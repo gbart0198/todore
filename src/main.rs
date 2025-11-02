@@ -90,13 +90,19 @@ struct TaskList {
     tasks: Vec<Task>,
 }
 impl TaskList {
+    fn new() -> Self {
+        TaskList { tasks: vec![] }
+    }
+
     fn add(&mut self, task: Task) -> Result<(), String> {
         self.tasks.push(task);
         Ok(())
     }
 
-    fn new() -> Self {
-        TaskList { tasks: vec![] }
+    fn remove(&mut self, task_id: u32) -> Result<(), String> {
+        self.tasks.retain(|task| task.id != task_id);
+
+        Ok(())
     }
 
     fn update_status(&mut self, task_id: u32, new_status: TaskStatus) -> Result<(), String> {
@@ -140,4 +146,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", tasks.export(&pt_f)?);
     println!("{}", tasks.export(&yaml_f)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_status() {
+        let mut list = TaskList::new();
+
+        list.add(Task::new(1, "Test".into())).unwrap();
+        assert!(matches!(list.tasks.len(), 1));
+
+        list.update_status(1, TaskStatus::InProgress).unwrap();
+        assert!(matches!(list.tasks[0].status, TaskStatus::InProgress));
+    }
+
+    #[test]
+    fn test_update_description() {
+        let mut list = TaskList::new();
+
+        list.add(Task::new(2, "Test2".into())).unwrap();
+        let new_description = "Test123";
+
+        list.update_description(2, new_description.into()).unwrap();
+        assert_eq!(list.tasks[0].description, new_description);
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut list = TaskList::new();
+
+        list.add(Task::new(1, "Test1".into())).unwrap();
+        assert_eq!(list.tasks.len(), 1);
+
+        list.remove(1).unwrap();
+        assert_eq!(list.tasks.len(), 0);
+    }
 }
