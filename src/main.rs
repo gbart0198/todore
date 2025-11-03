@@ -1,5 +1,7 @@
 use serde::Serialize;
 use std::fmt;
+use std::io;
+use std::str::FromStr;
 
 trait Formatter {
     fn format(&self, tasks: &[Task]) -> Result<String, Box<dyn std::error::Error>>;
@@ -73,6 +75,18 @@ enum TaskStatus {
     Completed,
 }
 
+impl FromStr for TaskStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "not started" | "ns" => Ok(TaskStatus::NotStarted),
+            "in progress" | "ip" => Ok(TaskStatus::InProgress),
+            "completed" | "c" => Ok(TaskStatus::Completed),
+            _ => Err("Error while parsing task status".into()),
+        }
+    }
+}
+
 impl fmt::Display for TaskStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
@@ -122,29 +136,163 @@ impl TaskList {
         }
     }
 
-    fn export<T: Formatter>(&self, formatter: &T) -> Result<String, Box<dyn std::error::Error>> {
+    fn export<T: Formatter>(
+        &self,
+        formatter: &dyn Formatter,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         formatter.format(&self.tasks)
     }
 }
 
+enum Command {
+    Add {
+        val: String,
+    },
+    Remove {
+        id: u32,
+    },
+    Update {
+        id: u32,
+        new_val: String,
+        field: TaskField,
+    },
+    Export {
+        format: Format,
+    },
+    Quit,
+}
+
+enum Format {
+    Json,
+    Yaml,
+    Plaintext,
+}
+
+impl FromStr for Format {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "j" | "json" => Ok(Format::Json),
+            "y" | "yaml" => Ok(Format::Yaml),
+            "p" | "plaintext" => Ok(Format::Plaintext),
+            _ => Err("Invalid export format.".into()),
+        }
+    }
+}
+
+enum TaskField {
+    Description,
+    Status,
+}
+
+impl FromStr for TaskField {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "description" | "d" => Ok(TaskField::Description),
+            "status" | "s" => Ok(TaskField::Status),
+            _ => Err("Invalid field argument".into()),
+        }
+    }
+}
+
+impl Command {
+    fn from_str(val: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let parts: Vec<_> = val.split(" ").collect();
+        match parts[0] {
+            "a" | "add" => {
+                if parts.len() < 2 {
+                    return Err("Invalid arguments for add.".into());
+                }
+                let val = parts[1].into();
+                Ok(Command::Add { val })
+            }
+            "r" | "remove" => {
+                if parts.len() < 2 {
+                    return Err("Invalid arguments for remove.".into());
+                }
+                let id = parts[1].parse::<u32>()?;
+                Ok(Command::Remove { id })
+            }
+            "u" | "update" => {
+                if parts.len() < 4 {
+                    return Err("Invalid arguments for update.".into());
+                }
+                let id = parts[1].parse::<u32>()?;
+                let field = TaskField::from_str(&parts[2].to_lowercase())?;
+                let new_val = parts[3].into();
+
+                Ok(Command::Update { id, new_val, field })
+            }
+            "q" | "quit" => Ok(Command::Quit),
+            "e" | "export" => {
+                if parts.len() < 2 {
+                    return Err("Invalid arguments for export.".into());
+                }
+                let format = Format::from_str(parts[1])?;
+                Ok(Command::Export { format })
+            }
+            _ => Err("Invalid argument.".into()),
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut tasks = TaskList::new();
-    let task1 = Task::new(1, "Testing task".into());
-    let task2 = Task::new(2, "Testing task 2".into());
-    tasks.add(task1)?;
-    tasks.add(task2)?;
+    let mut task_list = TaskList::new();
+    println!("Welcome to the Todore in-memory TODO list!");
 
-    tasks.update_status(1, TaskStatus::InProgress)?;
-    tasks.update_status(2, TaskStatus::Completed)?;
-    tasks.update_description(1, "New description!".into())?;
+    let mut input = String::new();
+    let jf = JsonFormatter::new();
+    let yf = YamlFormatter::new();
+    let ptf = PlaintextFormatter::new();
+    let mut counter = 0;
+    loop {
+        if !task_list.tasks.is_empty() {
+            println!("Here are your current tasks:");
+            println!("{}", task_list.export::<JsonFormatter>(&jf)?);
+        }
+        println!("Below are the options:");
+        println!("[a | add] <TODO-item>");
+        println!("[r | remove] <TODO-item-id>");
+        println!("[u | update] <TODO-item-id> [s | status] | [d | description] <new-value>");
+        println!("[e | export] [j | json] | [y | yaml] | [p | plaintext]");
+        println!("[q | quit]");
 
-    let json_f = JsonFormatter::new();
-    let pt_f = PlaintextFormatter::new();
-    let yaml_f = YamlFormatter::new();
+        io::stdin().read_line(&mut input)?;
 
-    println!("{}", tasks.export(&json_f)?);
-    println!("{}", tasks.export(&pt_f)?);
-    println!("{}", tasks.export(&yaml_f)?);
+        println!("You chose: {}", input.trim());
+        let command = Command::from_str(&input.trim().to_lowercase())?;
+        match command {
+            Command::Add { val } => {
+                task_list.add(Task::new(counter, val))?;
+                counter += 1;
+            }
+            Command::Remove { id } => task_list.remove(id)?,
+            Command::Update { id, new_val, field } => match field {
+                TaskField::Description => task_list.update_description(id, new_val)?,
+                TaskField::Status => {
+                    task_list.update_status(id, TaskStatus::from_str(&new_val)?)?
+                }
+            },
+            Command::Quit => break,
+            Command::Export { format } => match format {
+                Format::Json => {
+                    println!("{}", task_list.export::<JsonFormatter>(&jf)?);
+                }
+                Format::Yaml => {
+                    println!("{}", task_list.export::<YamlFormatter>(&yf)?);
+                }
+                Format::Plaintext => {
+                    println!("{}", task_list.export::<PlaintextFormatter>(&ptf)?);
+                }
+            },
+        }
+
+        input.clear();
+    }
+
     Ok(())
 }
 
