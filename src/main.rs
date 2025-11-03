@@ -108,15 +108,12 @@ impl TaskList {
         TaskList { tasks: vec![] }
     }
 
-    fn add(&mut self, task: Task) -> Result<(), String> {
+    fn add(&mut self, task: Task) -> () {
         self.tasks.push(task);
-        Ok(())
     }
 
-    fn remove(&mut self, task_id: u32) -> Result<(), String> {
+    fn remove(&mut self, task_id: u32) -> () {
         self.tasks.retain(|task| task.id != task_id);
-
-        Ok(())
     }
 
     fn update_status(&mut self, task_id: u32, new_status: TaskStatus) -> Result<(), String> {
