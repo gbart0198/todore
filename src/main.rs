@@ -144,14 +144,13 @@ impl TaskList {
     }
 
     fn import(&mut self, tasks: &str) -> Result<(), Box<dyn std::error::Error>> {
-        println!("importing");
-        println!("{}", tasks);
-        serde_json::from_str::<TaskList>(tasks)?;
-        println!("after import");
+        let imported: TaskList = serde_json::from_str(tasks)?;
+        self.tasks = imported.tasks;
         Ok(())
     }
 }
 
+#[derive(Debug)]
 enum Command {
     Add {
         val: String,
@@ -171,6 +170,7 @@ enum Command {
     Quit,
 }
 
+#[derive(Debug)]
 enum Format {
     Json,
     Yaml,
@@ -190,6 +190,7 @@ impl FromStr for Format {
     }
 }
 
+#[derive(Debug)]
 enum TaskField {
     Description,
     Status,
@@ -352,5 +353,423 @@ mod tests {
 
         list.remove(1);
         assert_eq!(list.tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_task_new() {
+        let task = Task::new(42, "Test task".to_string());
+        assert_eq!(task.id, 42);
+        assert_eq!(task.description, "Test task");
+        assert!(matches!(task.status, TaskStatus::NotStarted));
+    }
+
+    #[test]
+    fn test_task_serialization() {
+        let task = Task::new(1, "Test task".to_string());
+        let json = serde_json::to_string(&task).unwrap();
+        let deserialized: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, task.id);
+        assert_eq!(deserialized.description, task.description);
+        assert!(matches!(deserialized.status, TaskStatus::NotStarted));
+    }
+
+    // TaskStatus enum tests
+    #[test]
+    fn test_taskstatus_fromstr_valid() {
+        assert!(matches!(
+            TaskStatus::from_str("not started"),
+            Ok(TaskStatus::NotStarted)
+        ));
+        assert!(matches!(
+            TaskStatus::from_str("ns"),
+            Ok(TaskStatus::NotStarted)
+        ));
+        assert!(matches!(
+            TaskStatus::from_str("in progress"),
+            Ok(TaskStatus::InProgress)
+        ));
+        assert!(matches!(
+            TaskStatus::from_str("ip"),
+            Ok(TaskStatus::InProgress)
+        ));
+        assert!(matches!(
+            TaskStatus::from_str("completed"),
+            Ok(TaskStatus::Completed)
+        ));
+        assert!(matches!(
+            TaskStatus::from_str("c"),
+            Ok(TaskStatus::Completed)
+        ));
+    }
+
+    #[test]
+    fn test_taskstatus_fromstr_invalid() {
+        assert!(TaskStatus::from_str("invalid").is_err());
+        assert!(TaskStatus::from_str("").is_err());
+        assert!(TaskStatus::from_str("notstarted").is_err());
+        assert!(TaskStatus::from_str("done").is_err());
+    }
+
+    #[test]
+    fn test_taskstatus_display() {
+        assert_eq!(format!("{}", TaskStatus::NotStarted), "Not Started");
+        assert_eq!(format!("{}", TaskStatus::InProgress), "In Progress");
+        assert_eq!(format!("{}", TaskStatus::Completed), "Completed");
+    }
+
+    #[test]
+    fn test_taskstatus_serialization() {
+        let statuses = vec![
+            TaskStatus::NotStarted,
+            TaskStatus::InProgress,
+            TaskStatus::Completed,
+        ];
+        for status in statuses {
+            let json = serde_json::to_string(&status).unwrap();
+            let deserialized: TaskStatus = serde_json::from_str(&json).unwrap();
+            assert!(matches!(
+                (status, deserialized),
+                (TaskStatus::NotStarted, TaskStatus::NotStarted)
+                    | (TaskStatus::InProgress, TaskStatus::InProgress)
+                    | (TaskStatus::Completed, TaskStatus::Completed)
+            ));
+        }
+    }
+
+    // TaskList struct tests
+    #[test]
+    fn test_tasklist_new() {
+        let list = TaskList::new();
+        assert_eq!(list.tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_tasklist_add() {
+        let mut list = TaskList::new();
+        let task = Task::new(1, "Test task".to_string());
+        list.add(task);
+        assert_eq!(list.tasks.len(), 1);
+        assert_eq!(list.tasks[0].id, 1);
+        assert_eq!(list.tasks[0].description, "Test task");
+    }
+
+    #[test]
+    fn test_tasklist_update_status_nonexistent() {
+        let mut list = TaskList::new();
+        let result = list.update_status(999, TaskStatus::Completed);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Task with id 999 was not found");
+    }
+
+    #[test]
+    fn test_tasklist_update_description_nonexistent() {
+        let mut list = TaskList::new();
+        let result = list.update_description(999, "New description".to_string());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Task with id 999 was not found");
+    }
+
+    #[test]
+    fn test_tasklist_export_import() {
+        let mut list = TaskList::new();
+        list.add(Task::new(1, "Task 1".to_string()));
+        list.add(Task::new(2, "Task 2".to_string()));
+
+        // Export to JSON
+        let json_formatter = JsonFormatter::new();
+        let json_str = list
+            .export_to_string::<JsonFormatter>(&json_formatter)
+            .unwrap();
+
+        // Import into new list
+        let mut new_list = TaskList::new();
+        new_list.import(&json_str).unwrap();
+
+        // Verify import worked
+        assert_eq!(new_list.tasks.len(), 2);
+        assert_eq!(new_list.tasks[0].id, 1);
+        assert_eq!(new_list.tasks[0].description, "Task 1");
+        assert_eq!(new_list.tasks[1].id, 2);
+        assert_eq!(new_list.tasks[1].description, "Task 2");
+    }
+
+    #[test]
+    fn test_tasklist_import_invalid_json() {
+        let mut list = TaskList::new();
+        let result = list.import("invalid json");
+        assert!(result.is_err());
+    }
+
+    // Formatter implementation tests
+    #[test]
+    fn test_plaintext_formatter() {
+        let mut list = TaskList::new();
+        list.add(Task::new(1, "Task 1".to_string()));
+        list.add(Task::new(2, "Task 2".to_string()));
+
+        let formatter = PlaintextFormatter::new();
+        let result = formatter.format(&list).unwrap();
+
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("1: Task 1"));
+        assert!(lines[1].contains("2: Task 2"));
+    }
+
+    #[test]
+    fn test_json_formatter() {
+        let mut list = TaskList::new();
+        list.add(Task::new(1, "Test task".to_string()));
+
+        let formatter = JsonFormatter::new();
+        let result = formatter.format(&list).unwrap();
+
+        // Should be valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["tasks"][0]["id"], 1);
+        assert_eq!(parsed["tasks"][0]["description"], "Test task");
+    }
+
+    #[test]
+    fn test_yaml_formatter() {
+        let mut list = TaskList::new();
+        list.add(Task::new(1, "Test task".to_string()));
+
+        let formatter = YamlFormatter::new();
+        let result = formatter.format(&list).unwrap();
+
+        // Should be valid YAML
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&result).unwrap();
+        assert_eq!(parsed["tasks"][0]["id"].as_u64().unwrap(), 1);
+        assert_eq!(
+            parsed["tasks"][0]["description"].as_str().unwrap(),
+            "Test task"
+        );
+    }
+
+    // Command parsing tests
+    #[test]
+    fn test_command_add() {
+        let cmd = Command::from_str("add Buy groceries").unwrap();
+        match cmd {
+            Command::Add { val } => assert_eq!(val, "Buy"),
+            _ => panic!("Expected Add command"),
+        }
+
+        let cmd_short = Command::from_str("a Buy groceries").unwrap();
+        match cmd_short {
+            Command::Add { val } => assert_eq!(val, "Buy"),
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_add_insufficient_args() {
+        let result = Command::from_str("add");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid arguments for add."
+        );
+    }
+
+    #[test]
+    fn test_command_remove() {
+        let cmd = Command::from_str("remove 5").unwrap();
+        match cmd {
+            Command::Remove { id } => assert_eq!(id, 5),
+            _ => panic!("Expected Remove command"),
+        }
+
+        let cmd_short = Command::from_str("r 10").unwrap();
+        match cmd_short {
+            Command::Remove { id } => assert_eq!(id, 10),
+            _ => panic!("Expected Remove command"),
+        }
+    }
+
+    #[test]
+    fn test_command_remove_insufficient_args() {
+        let result = Command::from_str("remove");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid arguments for remove."
+        );
+    }
+
+    #[test]
+    fn test_command_remove_invalid_id() {
+        let result = Command::from_str("remove abc");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_update_status() {
+        let cmd = Command::from_str("update 1 status completed").unwrap();
+        match cmd {
+            Command::Update { id, new_val, field } => {
+                assert_eq!(id, 1);
+                assert_eq!(new_val, "completed");
+                assert!(matches!(field, TaskField::Status));
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        let cmd_short = Command::from_str("u 2 s ip").unwrap();
+        match cmd_short {
+            Command::Update { id, new_val, field } => {
+                assert_eq!(id, 2);
+                assert_eq!(new_val, "ip");
+                assert!(matches!(field, TaskField::Status));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_description() {
+        let cmd = Command::from_str("update 1 description New description").unwrap();
+        match cmd {
+            Command::Update { id, new_val, field } => {
+                assert_eq!(id, 1);
+                assert_eq!(new_val, "New");
+                assert!(matches!(field, TaskField::Description));
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        let cmd_short = Command::from_str("u 2 d Short desc").unwrap();
+        match cmd_short {
+            Command::Update { id, new_val, field } => {
+                assert_eq!(id, 2);
+                assert_eq!(new_val, "Short");
+                assert!(matches!(field, TaskField::Description));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_insufficient_args() {
+        let result = Command::from_str("update 1 status");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid arguments for update."
+        );
+    }
+
+    #[test]
+    fn test_command_update_invalid_field() {
+        let result = Command::from_str("update 1 invalid completed");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_export() {
+        let cmd = Command::from_str("export json output.json").unwrap();
+        match cmd {
+            Command::Export { format, out_file } => {
+                assert!(matches!(format, Format::Json));
+                assert_eq!(out_file, "output.json");
+            }
+            _ => panic!("Expected Export command"),
+        }
+
+        let cmd_short = Command::from_str("e y output.yaml").unwrap();
+        match cmd_short {
+            Command::Export { format, out_file } => {
+                assert!(matches!(format, Format::Yaml));
+                assert_eq!(out_file, "output.yaml");
+            }
+            _ => panic!("Expected Export command"),
+        }
+
+        let cmd_plaintext = Command::from_str("e p output.txt").unwrap();
+        match cmd_plaintext {
+            Command::Export { format, out_file } => {
+                assert!(matches!(format, Format::Plaintext));
+                assert_eq!(out_file, "output.txt");
+            }
+            _ => panic!("Expected Export command"),
+        }
+    }
+
+    #[test]
+    fn test_command_export_insufficient_args() {
+        let result = Command::from_str("export json");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid arguments for export."
+        );
+    }
+
+    #[test]
+    fn test_command_export_invalid_format() {
+        let result = Command::from_str("export invalid output.txt");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_quit() {
+        let cmd = Command::from_str("quit").unwrap();
+        assert!(matches!(cmd, Command::Quit));
+
+        let cmd_short = Command::from_str("q").unwrap();
+        assert!(matches!(cmd_short, Command::Quit));
+    }
+
+    #[test]
+    fn test_command_invalid() {
+        let result = Command::from_str("invalid command");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Invalid argument.");
+    }
+
+    // Format and TaskField enum parsing tests
+    #[test]
+    fn test_format_fromstr_valid() {
+        assert!(matches!(Format::from_str("json"), Ok(Format::Json)));
+        assert!(matches!(Format::from_str("j"), Ok(Format::Json)));
+        assert!(matches!(Format::from_str("yaml"), Ok(Format::Yaml)));
+        assert!(matches!(Format::from_str("y"), Ok(Format::Yaml)));
+        assert!(matches!(
+            Format::from_str("plaintext"),
+            Ok(Format::Plaintext)
+        ));
+        assert!(matches!(Format::from_str("p"), Ok(Format::Plaintext)));
+    }
+
+    #[test]
+    fn test_format_fromstr_invalid() {
+        assert!(Format::from_str("invalid").is_err());
+        assert!(Format::from_str("").is_err());
+        assert!(Format::from_str("txt").is_err());
+    }
+
+    #[test]
+    fn test_taskfield_fromstr_valid() {
+        assert!(matches!(
+            TaskField::from_str("description"),
+            Ok(TaskField::Description)
+        ));
+        assert!(matches!(
+            TaskField::from_str("d"),
+            Ok(TaskField::Description)
+        ));
+        assert!(matches!(
+            TaskField::from_str("status"),
+            Ok(TaskField::Status)
+        ));
+        assert!(matches!(TaskField::from_str("s"), Ok(TaskField::Status)));
+    }
+
+    #[test]
+    fn test_taskfield_fromstr_invalid() {
+        assert!(TaskField::from_str("invalid").is_err());
+        assert!(TaskField::from_str("").is_err());
+        assert!(TaskField::from_str("name").is_err());
     }
 }
