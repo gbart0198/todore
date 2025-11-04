@@ -1,17 +1,20 @@
+use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
+use std::fs;
 use std::io;
 use std::str::FromStr;
 
 trait Formatter {
-    fn format(&self, tasks: &[Task]) -> Result<String, Box<dyn std::error::Error>>;
+    fn format(&self, tasks: &TaskList) -> Result<String, Box<dyn std::error::Error>>;
 }
 
 struct PlaintextFormatter;
 
 impl Formatter for PlaintextFormatter {
-    fn format(&self, tasks: &[Task]) -> Result<String, Box<dyn std::error::Error>> {
+    fn format(&self, tasks: &TaskList) -> Result<String, Box<dyn std::error::Error>> {
         Ok(tasks
+            .tasks
             .iter()
             .map(|task| format!("{}: {}\t{}", task.id, task.description, task.status))
             .collect::<Vec<_>>()
@@ -38,7 +41,7 @@ impl YamlFormatter {
 struct JsonFormatter;
 
 impl Formatter for JsonFormatter {
-    fn format(&self, tasks: &[Task]) -> Result<String, Box<dyn std::error::Error>> {
+    fn format(&self, tasks: &TaskList) -> Result<String, Box<dyn std::error::Error>> {
         Ok(serde_json::to_string_pretty(tasks)?)
     }
 }
@@ -46,12 +49,12 @@ impl Formatter for JsonFormatter {
 struct YamlFormatter;
 
 impl Formatter for YamlFormatter {
-    fn format(&self, tasks: &[Task]) -> Result<String, Box<dyn std::error::Error>> {
+    fn format(&self, tasks: &TaskList) -> Result<String, Box<dyn std::error::Error>> {
         Ok(serde_yaml::to_string(tasks)?)
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Task {
     id: u32,
     description: String,
@@ -68,7 +71,7 @@ impl Task {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 enum TaskStatus {
     NotStarted,
     InProgress,
@@ -99,7 +102,7 @@ impl fmt::Display for TaskStatus {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TaskList {
     tasks: Vec<Task>,
 }
@@ -137,7 +140,15 @@ impl TaskList {
         &self,
         formatter: &dyn Formatter,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        formatter.format(&self.tasks)
+        formatter.format(self)
+    }
+
+    fn import(&mut self, tasks: &str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("importing");
+        println!("{}", tasks);
+        serde_json::from_str::<TaskList>(tasks)?;
+        println!("after import");
+        Ok(())
     }
 }
 
@@ -155,6 +166,7 @@ enum Command {
     },
     Export {
         format: Format,
+        out_file: String,
     },
     Quit,
 }
@@ -225,11 +237,14 @@ impl Command {
             }
             "q" | "quit" => Ok(Command::Quit),
             "e" | "export" => {
-                if parts.len() < 2 {
+                if parts.len() < 3 {
                     return Err("Invalid arguments for export.".into());
                 }
                 let format = Format::from_str(parts[1])?;
-                Ok(Command::Export { format })
+                Ok(Command::Export {
+                    format,
+                    out_file: parts[2].into(),
+                })
             }
             _ => Err("Invalid argument.".into()),
         }
@@ -239,6 +254,12 @@ impl Command {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut task_list = TaskList::new();
     println!("Welcome to the Todore in-memory TODO list!");
+
+    // lets load the tasks from a file in a shared location, if it exists
+    // for testing purposes, lets make this file directly under the pwd
+    let tasks_file = "tasks.json";
+    let existing_tasks = fs::read_to_string(tasks_file)?;
+    task_list.import(&existing_tasks)?;
 
     let mut input = String::new();
     let jf = JsonFormatter::new();
@@ -274,18 +295,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
             Command::Quit => break,
-            Command::Export { format } => match format {
+            Command::Export { format, out_file } => match format {
                 Format::Json => {
-                    println!("{}", task_list.export_to_string::<JsonFormatter>(&jf)?);
+                    let content = task_list.export_to_string::<JsonFormatter>(&jf)?;
+                    fs::write(out_file, content)?;
                 }
                 Format::Yaml => {
-                    println!("{}", task_list.export_to_string::<YamlFormatter>(&yf)?);
+                    let content = task_list.export_to_string::<YamlFormatter>(&yf)?;
+                    fs::write(out_file, content)?;
                 }
                 Format::Plaintext => {
-                    println!(
-                        "{}",
-                        task_list.export_to_string::<PlaintextFormatter>(&ptf)?
-                    );
+                    let content = task_list.export_to_string::<PlaintextFormatter>(&ptf)?;
+                    fs::write(out_file, content)?;
                 }
             },
         }
