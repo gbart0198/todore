@@ -108,11 +108,11 @@ impl TaskList {
         TaskList { tasks: vec![] }
     }
 
-    fn add(&mut self, task: Task) -> () {
+    fn add(&mut self, task: Task) {
         self.tasks.push(task);
     }
 
-    fn remove(&mut self, task_id: u32) -> () {
+    fn remove(&mut self, task_id: u32) {
         self.tasks.retain(|task| task.id != task_id);
     }
 
@@ -133,7 +133,7 @@ impl TaskList {
         }
     }
 
-    fn export<T: Formatter>(
+    fn export_to_string<T: Formatter>(
         &self,
         formatter: &dyn Formatter,
     ) -> Result<String, Box<dyn std::error::Error>> {
@@ -248,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         if !task_list.tasks.is_empty() {
             println!("Here are your current tasks:");
-            println!("{}", task_list.export::<JsonFormatter>(&jf)?);
+            println!("{}", task_list.export_to_string::<JsonFormatter>(&jf)?);
         }
         println!("Below are the options:");
         println!("[a | add] <TODO-item>");
@@ -263,10 +263,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let command = Command::from_str(&input.trim().to_lowercase())?;
         match command {
             Command::Add { val } => {
-                task_list.add(Task::new(counter, val))?;
+                task_list.add(Task::new(counter, val));
                 counter += 1;
             }
-            Command::Remove { id } => task_list.remove(id)?,
+            Command::Remove { id } => task_list.remove(id),
             Command::Update { id, new_val, field } => match field {
                 TaskField::Description => task_list.update_description(id, new_val)?,
                 TaskField::Status => {
@@ -276,13 +276,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Command::Quit => break,
             Command::Export { format } => match format {
                 Format::Json => {
-                    println!("{}", task_list.export::<JsonFormatter>(&jf)?);
+                    println!("{}", task_list.export_to_string::<JsonFormatter>(&jf)?);
                 }
                 Format::Yaml => {
-                    println!("{}", task_list.export::<YamlFormatter>(&yf)?);
+                    println!("{}", task_list.export_to_string::<YamlFormatter>(&yf)?);
                 }
                 Format::Plaintext => {
-                    println!("{}", task_list.export::<PlaintextFormatter>(&ptf)?);
+                    println!(
+                        "{}",
+                        task_list.export_to_string::<PlaintextFormatter>(&ptf)?
+                    );
                 }
             },
         }
@@ -301,7 +304,7 @@ mod tests {
     fn test_update_status() {
         let mut list = TaskList::new();
 
-        list.add(Task::new(1, "Test".into())).unwrap();
+        list.add(Task::new(1, "Test".into()));
         assert!(matches!(list.tasks.len(), 1));
 
         list.update_status(1, TaskStatus::InProgress).unwrap();
@@ -312,7 +315,7 @@ mod tests {
     fn test_update_description() {
         let mut list = TaskList::new();
 
-        list.add(Task::new(2, "Test2".into())).unwrap();
+        list.add(Task::new(2, "Test2".into()));
         let new_description = "Test123";
 
         list.update_description(2, new_description.into()).unwrap();
@@ -323,10 +326,10 @@ mod tests {
     fn test_remove() {
         let mut list = TaskList::new();
 
-        list.add(Task::new(1, "Test1".into())).unwrap();
+        list.add(Task::new(1, "Test1".into()));
         assert_eq!(list.tasks.len(), 1);
 
-        list.remove(1).unwrap();
+        list.remove(1);
         assert_eq!(list.tasks.len(), 0);
     }
 }
